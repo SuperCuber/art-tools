@@ -109,6 +109,20 @@
     align-self: flex-start;
   }
 
+  #reset-btn {
+    padding: 9px 22px;
+    background: #333;
+    color: #f0ede8;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: opacity 0.15s;
+    flex-shrink: 0;
+    align-self: flex-start;
+  }
+
   #instruction-row {
     display: flex;
     align-items: flex-start;
@@ -125,6 +139,7 @@
     <span id="instruction-text"></span>
     <button id="next-btn" disabled>Next →</button>
     <div id="done-msg">All steps complete</div>
+    <button id="reset-btn" style="display:none">Reset</button>
   </div>
   <div id="controls" style="display:none"></div>
 </div>
@@ -371,7 +386,7 @@ const STEPS = [
   },
   {
     label: 'Y2',
-    instruction: 'Again - the second point must make an angle >90 degrees from the first.',
+    instruction: 'Again - the second point must make an angle >90 degrees from the first.\nClick the circles to undo or redo steps.',
     constraint: halfPlaneConstraint(0, 1),
     draw(data, ctx, active) {
       if (active) this.constraint(canvas, data)?.draw(ctx);
@@ -401,7 +416,7 @@ const STEPS = [
   ]),
   {
     label: 'Box',
-    instruction: 'Complete the box.',
+    instruction: 'Connect the dots with 6 more lines to complete the box!',
     autoComplete: true,
     draw(data, ctx) {
       const p12 = lineIntersection(data[4], data[2], data[5], data[1]);
@@ -487,6 +502,7 @@ function updateNextBtn() {
   const isLast = currentStep === STEPS.length - 1;
   nextBtn.style.display = isLast ? 'none' : '';
   doneMsg.style.display = (isLast && stepData[currentStep]) ? 'block' : 'none';
+  document.getElementById('reset-btn').style.display = isLast ? '' : 'none';
   if (!isLast) nextBtn.disabled = stepData[currentStep] === null;
 }
 
@@ -529,6 +545,8 @@ function tryPlacePoint(e) {
       else if (!c.check(pt)) return;
     }
   }
+  for (let i = currentStep + 1; i < STEPS.length; i++) stepData[i] = null;
+  furthestReached = currentStep;
   stepData[currentStep] = pt;
   update();
 }
@@ -540,10 +558,15 @@ canvas.addEventListener('mouseleave',()  => { dragging = false; });
 
 nextBtn.addEventListener('click', () => {
   if (stepData[currentStep] === null) return;
-  // Clear all steps ahead — going forward from a past position starts fresh
-  for (let i = currentStep + 1; i < STEPS.length; i++) stepData[i] = null;
   currentStep++;
   furthestReached = currentStep;
+  update();
+});
+
+document.getElementById('reset-btn').addEventListener('click', () => {
+  currentStep = 0;
+  furthestReached = 0;
+  stepData = new Array(STEPS.length).fill(null);
   update();
 });
 
