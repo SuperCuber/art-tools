@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Y method</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: system-ui, sans-serif;
+    background: #f0ede8;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  #instruction {
+    padding: 14px 20px;
+    font-size: 15px;
+    color: #222;
+    background: #f0ede8;
+    border-bottom: 1px solid #d8d4ce;
+    line-height: 1.5;
+    height: 120px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow: hidden;
+  }
+
+  #controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  #controls label { font-size: 13px; color: #555; white-space: nowrap; }
+  #controls input[type=range] { flex: 1; accent-color: #1a6fcf; }
+  #controls input[type=number] { width: 64px; padding: 3px 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; }
+
+  #progress {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 20px;
+    border-bottom: 1px solid #d8d4ce;
+    background: #f0ede8;
+  }
+
+  .step-circle {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    border: 2px solid transparent;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    user-select: none;
+  }
+
+  .step-circle.future   { background: #ddd9d3; color: #999; cursor: default; }
+  .step-circle.current  { background: #1a6fcf; color: #fff; cursor: pointer; }
+  .step-circle.completed{ background: #2e8b4a; color: #fff; cursor: pointer; }
+  .step-circle.redo     { background: #a8c4e8; color: #fff; cursor: pointer; }
+
+  #canvas-wrap {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+  }
+
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    cursor: crosshair;
+    background: #f7f5f0;
+  }
+
+  #next-btn {
+    padding: 9px 22px;
+    background: #333;
+    color: #f0ede8;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: opacity 0.15s;
+    flex-shrink: 0;
+    align-self: flex-start;
+  }
+
+  #next-btn:disabled { opacity: 0.3; cursor: default; }
+
+  #done-msg {
+    padding: 9px 22px;
+    font-size: 14px;
+    color: #555;
+    display: none;
+    flex-shrink: 0;
+    align-self: flex-start;
+  }
+
+  #instruction-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  #instruction-text { flex: 1; white-space: pre-line; }
+</style>
+</head>
+<body>
+
+<div id="instruction">
+  <div id="instruction-row">
+    <span id="instruction-text"></span>
+    <button id="next-btn" disabled>Next →</button>
+    <div id="done-msg">All steps complete</div>
+  </div>
+  <div id="controls" style="display:none"></div>
+</div>
+<div id="progress"></div>
+
+<div id="canvas-wrap">
+  <canvas id="canvas"></canvas>
+</div>
+
+<script>
+// ─── Drawing primitives ────────────────────────────────────────────────────
+
+function drawPoint(ctx, pt) {
+  ctx.beginPath();
+  ctx.arc(pt.x, pt.y, 5, 0, Math.PI * 2);
+  ctx.fillStyle = '#222';
+  ctx.fill();
+}
+
+function drawLine(ctx, a, b) {
+  ctx.beginPath();
+  ctx.moveTo(a.x, a.y);
+  ctx.lineTo(b.x, b.y);
+  ctx.strokeStyle = '#222';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+}
+
+// ─── Constraints ──────────────────────────────────────────────────────────
+//
+// A constraint is a factory: (canvas, stepData) → { check(pt), draw(ctx) } | null
+// Steps declare `constraint` and call it in their own draw() to visualize
+// the valid zone, and the click handler calls it to gate placement.
+
+// Centered rectangle — wFrac/hFrac as fractions of canvas size.
+function rectConstraint(wFrac, hFrac) {
+  return (canvas, _data) => {
+    const w = canvas.width * wFrac, h = canvas.height * hFrac;
+    const r = { x: (canvas.width - w) / 2, y: (canvas.height - h) / 2, w, h };
+    return {
+      check: (pt) => pt.x >= r.x && pt.x <= r.x + r.w &&
+                     pt.y >= r.y && pt.y <= r.y + r.h,
+      draw: (ctx) => {
+        ctx.fillStyle = 'rgba(30, 120, 255, 0.08)';
+        ctx.fillRect(r.x, r.y, r.w, r.h);
+        ctx.save();
+        ctx.strokeStyle = 'rgba(30, 120, 255, 0.4)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([6, 4]);
+        ctx.strokeRect(r.x, r.y, r.w, r.h);
+        ctx.restore();
+      },
+    };
+  };
+}
+
+// Half-plane: valid points are those forming ≥90° at data[pivotIdx] relative
+// to data[dirIdx]. The boundary is the perpendicular to pivot→dir at pivot.
+function halfPlaneConstraint(pivotIdx, dirIdx) {
+  return (canvas, data) => {
+    const pivot = data[pivotIdx], dir = data[dirIdx];
+    if (!pivot || !dir) return null;
+    const dx = dir.x - pivot.x, dy = dir.y - pivot.y;
+    const len = Math.hypot(canvas.width, canvas.height) * 2;
+    const norm = Math.hypot(dx, dy);
+    const ndx = dx / norm, ndy = dy / norm; // unit vec pivot→dir
+    const pdx = -ndy,      pdy =  ndx;      // perpendicular
+
+    return {
+      // dot(pt - pivot, pivot→dir) ≤ 0  →  angle at pivot ≥ 90°
+      check: (pt) => (pt.x - pivot.x) * dx + (pt.y - pivot.y) * dy <= 0,
+      draw: (ctx) => {
+        ctx.save();
+        // valid half-plane shaded
+        ctx.beginPath();
+        ctx.moveTo(pivot.x + pdx * len,              pivot.y + pdy * len);
+        ctx.lineTo(pivot.x - pdx * len,              pivot.y - pdy * len);
+        ctx.lineTo(pivot.x - pdx * len - ndx * len,  pivot.y - pdy * len - ndy * len);
+        ctx.lineTo(pivot.x + pdx * len - ndx * len,  pivot.y + pdy * len - ndy * len);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(30, 120, 255, 0.08)';
+        ctx.fill();
+        // boundary line through pivot
+        ctx.beginPath();
+        ctx.moveTo(pivot.x + pdx * len, pivot.y + pdy * len);
+        ctx.lineTo(pivot.x - pdx * len, pivot.y - pdy * len);
+        ctx.strokeStyle = 'rgba(30, 120, 255, 0.4)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([6, 4]);
+        ctx.stroke();
+        ctx.restore();
+      },
+    };
+  };
+}
+
+// Ray: projects the mouse onto a ray defined by direction data[originIdx]→data[dirIdx].
+// startIdx (default: originIdx) sets where the ray begins — t is clamped to >= 0 from there.
+function rayConstraint(originIdx, dirIdx, startIdx) {
+  return (canvas, data) => {
+    const origin = data[originIdx], dir = data[dirIdx];
+    const start  = data[startIdx ?? originIdx];
+    if (!origin || !dir || !start) return null;
+    const dx = dir.x - origin.x, dy = dir.y - origin.y;
+    const len = Math.hypot(dx, dy);
+    if (len === 0) return null;
+    const ndx = dx / len, ndy = dy / len;
+    const far = Math.hypot(canvas.width, canvas.height) * 2;
+
+    return {
+      project: (pt) => {
+        const t = Math.max(0, (pt.x - start.x) * ndx + (pt.y - start.y) * ndy);
+        return { x: start.x + ndx * t, y: start.y + ndy * t };
+      },
+      draw: (ctx) => {
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(start.x, start.y);
+        ctx.lineTo(start.x + ndx * far, start.y + ndy * far);
+        ctx.strokeStyle = '#555';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([6, 4]);
+        ctx.stroke();
+        ctx.restore();
+      },
+    };
+  };
+}
+
+// Intersection of multiple constraints — check requires all to pass, draw renders each.
+function intersectConstraints(...factories) {
+  return (canvas, data) => {
+    const cs = factories.map(f => f(canvas, data)).filter(Boolean);
+    if (cs.length === 0) return null;
+    return {
+      check: (pt) => cs.every(c => c.check(pt)),
+      draw:  (ctx) => cs.forEach(c => c.draw(ctx)),
+    };
+  };
+}
+
+function lineIntersection(a, b, c, d) {
+  const dx1 = b.x - a.x, dy1 = b.y - a.y;
+  const dx2 = d.x - c.x, dy2 = d.y - c.y;
+  const denom = dx1 * dy2 - dy1 * dx2;
+  if (Math.abs(denom) < 1e-10) return null;
+  const t = ((c.x - a.x) * dy2 - (c.y - a.y) * dx2) / denom;
+  return { x: a.x + t * dx1, y: a.y + t * dy1 };
+}
+
+// Factory for a vanishing-point step on the ray from Y0 through data[outerIdx].
+// dataIdx is where the VP is stored. Lines are drawn to all other outer points.
+// intersections: array of [a,b,c,d] index tuples — draws a point at lineIntersection(data[a..d]).
+function vpStep(label, instruction, outerIdx, dataIdx, intersections = []) {
+  return {
+    label,
+    instruction,
+    constraint: rayConstraint(0, outerIdx, outerIdx),
+    draw(data, ctx, active, isFinal) {
+      if (active) this.constraint(canvas, data)?.draw(ctx);
+      if (!data[dataIdx]) return;
+      if (!isFinal) drawPoint(ctx, data[dataIdx]);
+      if (!isFinal) {
+        ctx.save();
+        ctx.strokeStyle = '#555';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([6, 4]);
+        [1, 2, 3].filter(i => i !== outerIdx).forEach(i => {
+          if (data[i]) {
+            ctx.beginPath();
+            ctx.moveTo(data[i].x, data[i].y);
+            ctx.lineTo(data[dataIdx].x, data[dataIdx].y);
+            ctx.stroke();
+          }
+        });
+        ctx.restore();
+        intersections.forEach(([a, b, c, d]) => {
+          if (!data[a] || !data[b] || !data[c] || !data[d]) return;
+          const pt = lineIntersection(data[a], data[b], data[c], data[d]);
+          if (pt) drawPoint(ctx, pt);
+        });
+      }
+    },
+    buildControls(container, data, onChange) {
+      const origin = data[0], dir = data[outerIdx];
+      if (!origin || !dir) return;
+      const dx = dir.x - origin.x, dy = dir.y - origin.y;
+      const len = Math.hypot(dx, dy);
+      const ndx = dx / len, ndy = dy / len;
+      const maxDist = Math.round(Math.hypot(canvas.width, canvas.height));
+      const currentDist = data[dataIdx]
+        ? Math.round(Math.hypot(data[dataIdx].x - dir.x, data[dataIdx].y - dir.y))
+        : 0;
+
+      const lbl    = document.createElement('label'); lbl.textContent = 'Distance:';
+      const slider = document.createElement('input');
+      slider.type = 'range'; slider.min = 0; slider.max = maxDist; slider.value = currentDist;
+      const number = document.createElement('input');
+      number.type = 'number'; number.min = 0; number.max = maxDist; number.value = currentDist;
+
+      function apply(d) {
+        d = Math.max(0, Math.min(maxDist, d));
+        data[dataIdx] = { x: dir.x + ndx * d, y: dir.y + ndy * d };
+        onChange();
+      }
+      slider.addEventListener('input', () => { number.value = slider.value; apply(+slider.value); });
+      number.addEventListener('input', () => { slider.value = number.value; apply(+number.value); });
+      container.append(lbl, slider, number);
+    },
+  };
+}
+
+// ─── Step definitions ──────────────────────────────────────────────────────
+//
+// Each step has:
+//   label       — short text shown in the progress circle
+//   instruction — text shown above the progress bar while this step is active
+//   draw(data, ctx) — renders this step's visual contribution.
+//                     `data` is the full stepData array (entries for earlier
+//                     steps are already set; this step's entry may be null if
+//                     the user hasn't clicked yet).
+//
+// draw() is only called for steps 0..currentStep, so going back to a prior
+// step automatically hides everything that belongs to later steps.
+
+const STEPS = [
+  {
+    label: 'Y0',
+    instruction: 'Click/drag inside the highlighted area to place the center of the Y.',
+    constraint: rectConstraint(0.4, 0.4),
+    draw(data, ctx, active) {
+      if (active) this.constraint(canvas, data)?.draw(ctx);
+      if (data[0]) drawPoint(ctx, data[0]);
+    },
+  },
+  {
+    label: 'Y1',
+    instruction: 'Now place one of the other corners.',
+    draw(data, ctx) {
+      if (!data[1]) return;
+      drawPoint(ctx, data[1]);
+      if (data[0]) drawLine(ctx, data[0], data[1]);
+    },
+  },
+  {
+    label: 'Y2',
+    instruction: 'Again - the second point must make an angle >90 degrees from the first.',
+    constraint: halfPlaneConstraint(0, 1),
+    draw(data, ctx, active) {
+      if (active) this.constraint(canvas, data)?.draw(ctx);
+      if (!data[2]) return;
+      drawPoint(ctx, data[2]);
+      if (data[1]) drawLine(ctx, data[0], data[2]);
+    },
+  },
+  {
+    label: 'Y3',
+    instruction: 'Again, greater than 90 degrees angle from the other two.',
+    constraint: intersectConstraints(halfPlaneConstraint(0, 1), halfPlaneConstraint(0, 2)),
+    draw(data, ctx, active) {
+      if (active) this.constraint(canvas, data)?.draw(ctx);
+      if (!data[3]) return;
+      drawPoint(ctx, data[3]);
+      if (data[2]) drawLine(ctx, data[0], data[3]);
+    },
+  },
+  vpStep('VP1', 'Click/drag to set the first vanishing point.\nNote that this is not actually drawn, but estimated using the ghosting method. On your page, draw tiny dots to mark the direction of the two future lines defined by this VP.\nA VP on the canvas might give you very dramatic convergence - use the slider to put it further away.', 1, 4),
+  vpStep('VP2', 'Now set the second vanishing point. As you can see, we already have one of our final corners of the box! Find this point using the ghosting method and mark it. Make a tiny dot to remind yourself of the direction of the other line.', 2, 5, [
+    [4, 2, 5, 1], // VP1→Y2 ∩ VP2→Y1
+  ]),
+  vpStep('VP3', 'The third vanishing point. Find the two remaining intersections and mark them', 3, 6, [
+    [4, 3, 6, 1], // VP1→Y3 ∩ VP3→Y1
+    [5, 3, 6, 2], // VP2→Y3 ∩ VP3→Y2
+  ]),
+  {
+    label: 'Box',
+    instruction: 'Complete the box.',
+    autoComplete: true,
+    draw(data, ctx) {
+      const p12 = lineIntersection(data[4], data[2], data[5], data[1]);
+      const p13 = lineIntersection(data[4], data[3], data[6], data[1]);
+      const p23 = lineIntersection(data[5], data[3], data[6], data[2]);
+      const pts = [p12, p13, p23];
+
+      // Box edges: each arm endpoint connects to the two intersection points on its adjacent faces
+      const edges = [
+        [data[1], p12], [data[2], p12],
+        [data[1], p13], [data[3], p13],
+        [data[2], p23], [data[3], p23],
+      ];
+      edges.forEach(([a, b]) => { if (a && b) drawLine(ctx, a, b); });
+      pts.forEach(p => { if (p) drawPoint(ctx, p); });
+    },
+  },
+];
+
+// ─── State ─────────────────────────────────────────────────────────────────
+
+let currentStep    = 0;
+let furthestReached = 0;
+let stepData       = new Array(STEPS.length).fill(null);
+
+// ─── DOM refs ──────────────────────────────────────────────────────────────
+
+const canvas          = document.getElementById('canvas');
+const ctx             = canvas.getContext('2d');
+const instructionText = document.getElementById('instruction-text');
+const controlsEl      = document.getElementById('controls');
+const progress        = document.getElementById('progress');
+const nextBtn         = document.getElementById('next-btn');
+const doneMsg         = document.getElementById('done-msg');
+
+// ─── Rendering ─────────────────────────────────────────────────────────────
+
+function render() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  for (let i = 0; i <= currentStep; i++) {
+    STEPS[i].draw(stepData, ctx, i === currentStep, currentStep === STEPS.length - 1);
+  }
+}
+
+// ─── UI update ─────────────────────────────────────────────────────────────
+
+function buildProgress() {
+  progress.innerHTML = '';
+  STEPS.forEach((step, i) => {
+    const circle = document.createElement('div');
+    circle.className = 'step-circle';
+    circle.textContent = step.label;
+
+    if (i === currentStep) {
+      circle.classList.add('current');
+    } else if (i < currentStep) {
+      circle.classList.add('completed');
+      circle.addEventListener('click', () => goToStep(i));
+    } else if (i <= furthestReached) {
+      circle.classList.add('redo');
+      circle.addEventListener('click', () => goToStep(i));
+    } else {
+      circle.classList.add('future');
+    }
+
+    progress.appendChild(circle);
+  });
+}
+
+function updateInstruction() {
+  const step = STEPS[currentStep];
+  instructionText.textContent = step.instruction;
+  controlsEl.innerHTML = '';
+  if (step.buildControls) {
+    step.buildControls(controlsEl, stepData, () => { render(); updateNextBtn(); });
+    controlsEl.style.display = 'flex';
+  } else {
+    controlsEl.style.display = 'none';
+  }
+}
+
+function updateNextBtn() {
+  const isLast = currentStep === STEPS.length - 1;
+  nextBtn.style.display = isLast ? 'none' : '';
+  doneMsg.style.display = (isLast && stepData[currentStep]) ? 'block' : 'none';
+  if (!isLast) nextBtn.disabled = stepData[currentStep] === null;
+}
+
+function update() {
+  if (STEPS[currentStep].autoComplete && stepData[currentStep] === null)
+    stepData[currentStep] = true;
+  updateInstruction();
+  buildProgress();
+  updateNextBtn();
+  render();
+}
+
+// ─── Navigation ────────────────────────────────────────────────────────────
+
+function goToStep(i) {
+  if (i > furthestReached) return;
+  currentStep = i;
+  update();
+}
+
+// ─── Interactions ──────────────────────────────────────────────────────────
+
+let dragging = false;
+
+function canvasPoint(e) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (e.clientX - rect.left) * (canvas.width / rect.width),
+    y: (e.clientY - rect.top)  * (canvas.height / rect.height),
+  };
+}
+
+function tryPlacePoint(e) {
+  let pt = canvasPoint(e);
+  const step = STEPS[currentStep];
+  if (step.constraint) {
+    const c = step.constraint(canvas, stepData);
+    if (c) {
+      if (c.project) pt = c.project(pt);
+      else if (!c.check(pt)) return;
+    }
+  }
+  stepData[currentStep] = pt;
+  update();
+}
+
+canvas.addEventListener('mousedown', (e) => { dragging = true; tryPlacePoint(e); });
+canvas.addEventListener('mousemove', (e) => { if (dragging) tryPlacePoint(e); });
+canvas.addEventListener('mouseup',   ()  => { dragging = false; });
+canvas.addEventListener('mouseleave',()  => { dragging = false; });
+
+nextBtn.addEventListener('click', () => {
+  if (stepData[currentStep] === null) return;
+  // Clear all steps ahead — going forward from a past position starts fresh
+  for (let i = currentStep + 1; i < STEPS.length; i++) stepData[i] = null;
+  currentStep++;
+  furthestReached = currentStep;
+  update();
+});
+
+// ─── Init ──────────────────────────────────────────────────────────────────
+
+function resize() {
+  const wrap = document.getElementById('canvas-wrap');
+  canvas.width  = wrap.clientWidth;
+  canvas.height = wrap.clientHeight;
+  render();
+}
+
+window.addEventListener('resize', resize);
+resize();
+update();
+</script>
+</body>
+</html>
