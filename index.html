@@ -1,1 +1,82 @@
-You might be lookin for <a href="y-method.html">Y method</a>.
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Art Tools</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: system-ui, sans-serif;
+    background: #f0ede8;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+  }
+
+  h1 {
+    font-size: 22px;
+    font-weight: 700;
+    color: #222;
+    margin-bottom: 32px;
+    letter-spacing: -0.01em;
+  }
+
+  .tools {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+    max-width: 480px;
+  }
+
+  .tool-card {
+    display: block;
+    background: #f7f5f0;
+    border: 1px solid #d8d4ce;
+    border-radius: 10px;
+    padding: 18px 22px;
+    text-decoration: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  .tool-card:hover {
+    border-color: #b0aba4;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+  }
+
+  .tool-card h2 {
+    font-size: 15px;
+    font-weight: 600;
+    color: #222;
+    margin-bottom: 4px;
+  }
+
+  .tool-card p {
+    font-size: 13px;
+    color: #777;
+    line-height: 1.5;
+  }
+</style>
+</head>
+<body>
+
+<h1>Art Tools</h1>
+
+<div class="tools">
+  <a class="tool-card" href="y-method.html">
+    <h2>The Y Method</h2>
+    <p>Step-by-step guide to drawing a box in 3-point perspective using the Y method.</p>
+  </a>
+  <a class="tool-card" href="vanishing-points-rotation.html">
+    <h2>Vanishing Points &amp; Rotation</h2>
+    <p>Rotate a box on all three axes and watch how the vanishing points move — including off-canvas and infinite VPs.</p>
+  </a>
+</div>
+
+</body>
+</html>
