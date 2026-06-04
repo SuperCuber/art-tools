@@ -16,20 +16,12 @@
     background: #e8e4de;
     border-bottom: 1px solid #d8d4ce;
     font-size: 13px;
-    color: #888;
     flex-shrink: 0;
   }
 
-  #topbar a {
-    color: #555;
-    text-decoration: none;
-    font-weight: 500;
-  }
-
+  #topbar a { color: #555; text-decoration: none; font-weight: 500; }
   #topbar a:hover { color: #222; }
-
   #topbar .sep { color: #bbb; }
-
   #topbar .current { color: #222; font-weight: 500; }
 
   body {
@@ -41,10 +33,33 @@
     overflow: hidden;
   }
 
+  #mode-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    border-bottom: 1px solid #d8d4ce;
+    background: #f0ede8;
+    flex-shrink: 0;
+  }
+
+  .mode-tab {
+    padding: 5px 16px;
+    background: transparent;
+    color: #444;
+    border: 1px solid #c0bbb4;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+  }
+
+  .mode-tab:hover { background: #e8e4de; border-color: #a8a39c; }
+  .mode-tab.active { background: #333; color: #f0ede8; border-color: #333; }
+
   #instruction {
     padding: 14px 20px;
-    font-size: 15px;
-    color: #222;
     background: #f0ede8;
     border-bottom: 1px solid #d8d4ce;
     line-height: 1.5;
@@ -54,21 +69,16 @@
     gap: 8px;
   }
 
-  #instruction-text {
-    font-size: 13px;
-    color: #555;
-  }
+  #instruction-text { font-size: 13px; color: #555; }
 
-  .axis-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
+  #controls-area { display: flex; flex-direction: column; gap: 6px; }
+
+  .axis-row { display: flex; align-items: center; gap: 10px; }
 
   .axis-row label {
     font-size: 13px;
     color: #555;
-    width: 36px;
+    width: 54px;
     flex-shrink: 0;
     font-weight: 600;
   }
@@ -77,10 +87,7 @@
   .axis-row label.ry { color: #27ae60; }
   .axis-row label.rz { color: #2980b9; }
 
-  .axis-row input[type=range] {
-    flex: 1;
-    accent-color: #1a6fcf;
-  }
+  .axis-row input[type=range] { flex: 1; accent-color: #1a6fcf; }
 
   .axis-row input[type=number] {
     width: 58px;
@@ -91,17 +98,9 @@
     text-align: right;
   }
 
-  .axis-row .unit {
-    font-size: 12px;
-    color: #888;
-    width: 14px;
-  }
+  .axis-row .unit { font-size: 12px; color: #888; width: 14px; }
 
-  #canvas-wrap {
-    flex: 1;
-    position: relative;
-    overflow: hidden;
-  }
+  #canvas-wrap { flex: 1; position: relative; overflow: hidden; }
 
   canvas {
     display: block;
@@ -112,7 +111,6 @@
   }
 
   canvas.dragging { cursor: grabbing; }
-
 </style>
 </head>
 <body>
@@ -123,26 +121,15 @@
   <span class="current">Vanishing Points &amp; Rotation</span>
 </div>
 
+<div id="mode-bar">
+  <button class="mode-tab" data-mode="1pt">1-point</button>
+  <button class="mode-tab" data-mode="2pt">2-point</button>
+  <button class="mode-tab" data-mode="3pt">3-point</button>
+</div>
+
 <div id="instruction">
-  <span id="instruction-text">Drag the canvas to rotate the box (horizontal = Y axis, vertical = X axis). Use sliders for precise control. Watch how the vanishing points move as the box rotates.</span>
-  <div class="axis-row">
-    <label class="ry">Ry</label>
-    <input autocomplete="off" type="range" id="ry-slider" min="-180" max="180" step="1" value="0">
-    <input autocomplete="off" type="number" id="ry-num" min="-180" max="180" step="1" value="0">
-    <span class="unit">°</span>
-  </div>
-  <div class="axis-row">
-    <label class="rx">Rx</label>
-    <input autocomplete="off" type="range" id="rx-slider" min="-180" max="180" step="1" value="0">
-    <input autocomplete="off" type="number" id="rx-num" min="-180" max="180" step="1" value="0">
-    <span class="unit">°</span>
-  </div>
-  <div class="axis-row">
-    <label class="rz">Rz</label>
-    <input autocomplete="off" type="range" id="rz-slider" min="-180" max="180" step="1" value="0">
-    <input autocomplete="off" type="number" id="rz-num" min="-180" max="180" step="1" value="0">
-    <span class="unit">°</span>
-  </div>
+  <span id="instruction-text"></span>
+  <div id="controls-area"></div>
 </div>
 
 <div id="canvas-wrap">
@@ -152,59 +139,116 @@
 <script>
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const CAM_DIST  = 5.0;   // camera distance in world units
-const BOX_SIZE  = 1.0;   // half-size of box
-const DRAG_SENS = 0.35;  // degrees per pixel
+const CAM_DIST  = 5.0;
+const DRAG_SENS = 0.35;
 
-const VP_COLORS = ['#c0392b', '#27ae60', '#2980b9'];
 const VP_LABELS = ['VP1', 'VP2', 'VP3'];
 
-// 8 vertices of unit cube
+const BOX_VISIBLE  = '#222';
+const BOX_HIDDEN   = 'rgba(0,0,0,0.18)';
+const GUIDE_STROKE = 'rgba(0,0,0,0.14)';
+const VP_STROKE    = '#555';
+const HORIZON_STROKE = 'rgba(0,0,0,0.22)';
+
+const IDENTITY = [1,0,0, 0,1,0, 0,0,1];
+
 const VERTS = [
   [-1,-1,-1],[1,-1,-1],[1,1,-1],[-1,1,-1],
   [-1,-1, 1],[1,-1, 1],[1,1, 1],[-1,1, 1],
 ];
 
-// Edges grouped by axis (0=X, 1=Y, 2=Z)
 const EDGES = [
-  // X-axis edges (differ only in X coordinate, index 0)
-  [[0,1],[3,2],[4,5],[7,6]],
-  // Y-axis edges (differ only in Y coordinate, index 1)
-  [[0,3],[1,2],[4,7],[5,6]],
-  // Z-axis edges (differ only in Z coordinate, index 2)
-  [[0,4],[1,5],[2,6],[3,7]],
+  [[0,1],[3,2],[4,5],[7,6]],  // X-axis edges
+  [[0,3],[1,2],[4,7],[5,6]],  // Y-axis edges
+  [[0,4],[1,5],[2,6],[3,7]],  // Z-axis edges
 ];
 
-// 6 faces: [vertex indices, outward normal axis direction (pre-rotation)]
 const FACES = [
-  { verts:[0,1,2,3], n:[ 0, 0,-1] }, // back  (-Z)
-  { verts:[4,5,6,7], n:[ 0, 0, 1] }, // front (+Z)
-  { verts:[0,1,5,4], n:[ 0,-1, 0] }, // bottom(-Y)
-  { verts:[2,3,7,6], n:[ 0, 1, 0] }, // top   (+Y)
-  { verts:[0,3,7,4], n:[-1, 0, 0] }, // left  (-X)
-  { verts:[1,2,6,5], n:[ 1, 0, 0] }, // right (+X)
+  { verts:[0,1,2,3], n:[ 0, 0,-1] },
+  { verts:[4,5,6,7], n:[ 0, 0, 1] },
+  { verts:[0,1,5,4], n:[ 0,-1, 0] },
+  { verts:[2,3,7,6], n:[ 0, 1, 0] },
+  { verts:[0,3,7,4], n:[-1, 0, 0] },
+  { verts:[1,2,6,5], n:[ 1, 0, 0] },
 ];
+
+const INSTRUCTIONS = {
+  '1pt': 'Drag the box around. Notice how all depth edges still converge to the single VP at the center — no matter where the box is.',
+  '2pt': 'Horizontal drag rotates the box. Vertical drag moves the horizon. Notice the two VPs stay locked to the horizon line.',
+  '3pt': 'Drag to rotate freely on two axes. All three vanishing points shift as the box tilts.',
+};
+
+// ─── DOM refs ─────────────────────────────────────────────────────────────────
+
+const canvas = document.getElementById('canvas');
+const ctx    = canvas.getContext('2d');
+
+// ─── State ───────────────────────────────────────────────────────────────────
+
+let mode = '1pt';
+
+const state = {
+  // 1-point
+  boxOffsetX: 0,
+  boxOffsetY: 0,
+
+  // 2-point
+  ry2:         45,
+  horizonFrac: 0.5,
+  fov:         70,
+
+  // 3-point
+  rx3: 25,
+  ry3: 35,
+  rz3: 0,
+};
+
+let controlRefs = {};
+
+let animating   = false;
+let animFrameId = null;
+let animLastTime = null;
+
+function stopAnimation() {
+  if (animFrameId) { cancelAnimationFrame(animFrameId); animFrameId = null; }
+  animating = false; animLastTime = null;
+  const btn = document.getElementById('anim-btn');
+  if (btn) btn.textContent = 'Animate';
+}
+
+function toggleAnimation() {
+  if (animating) { stopAnimation(); return; }
+  animating = true;
+  document.getElementById('anim-btn').textContent = 'Stop';
+  function tick(ts) {
+    if (!animating) return;
+    if (animLastTime != null) {
+      const dt = (ts - animLastTime) / 1000;
+      state.ry2 = ((state.ry2 + 30 * dt) + 540) % 360 - 180;
+      if (controlRefs.ry2) {
+        const v = Math.round(state.ry2);
+        controlRefs.ry2.slider.value = v; controlRefs.ry2.num.value = v;
+      }
+      render();
+    }
+    animLastTime = ts;
+    animFrameId = requestAnimationFrame(tick);
+  }
+  animFrameId = requestAnimationFrame(tick);
+}
 
 // ─── 3D math ─────────────────────────────────────────────────────────────────
 
 function deg(d) { return d * Math.PI / 180; }
 
-// Build 3×3 rotation matrix from Euler angles (Y → X → Z order)
-// Returns flat array [m00,m01,m02, m10,m11,m12, m20,m21,m22]
 function makeRotation(rx, ry, rz) {
   const cx = Math.cos(deg(rx)), sx = Math.sin(deg(rx));
   const cy = Math.cos(deg(ry)), sy = Math.sin(deg(ry));
   const cz = Math.cos(deg(rz)), sz = Math.sin(deg(rz));
-
-  // Ry
-  const ry_m = [cy,0,sy, 0,1,0, -sy,0,cy];
-  // Rx
-  const rx_m = [1,0,0, 0,cx,-sx, 0,sx,cx];
-  // Rz
-  const rz_m = [cz,-sz,0, sz,cz,0, 0,0,1];
-
-  // M = Rz * Rx * Ry
-  return matMul(rz_m, matMul(rx_m, ry_m));
+  const Ry = [cy,0,sy, 0,1,0, -sy,0,cy];
+  const Rx = [1,0,0, 0,cx,-sx, 0,sx,cx];
+  const Rz = [cz,-sz,0, sz,cz,0, 0,0,1];
+  return matMul(Rz, matMul(Rx, Ry));
 }
 
 function matMul(a, b) {
@@ -225,111 +269,120 @@ function transformVec(m, v) {
   ];
 }
 
-function dot3(a, b) { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
-
-// Project a 3D point to 2D canvas coords
 function project(p, focal, cx, cy) {
   const denom = p[2] + CAM_DIST;
   if (denom <= 0.001) return null;
-  return {
-    x: cx + focal * p[0] / denom,
-    y: cy + focal * p[1] / denom,
-  };
+  return { x: cx + focal*p[0]/denom, y: cy + focal*p[1]/denom };
 }
 
-// Compute VP screen position for a given world-space direction vector
-// Returns { x, y } or null if at infinity (|vz| < epsilon)
 function computeVP(dir, focal, cx, cy) {
-  // Normalize so z > 0 (both signs converge to same screen point)
   let [vx, vy, vz] = dir;
-  if (vz < 0) { vx = -vx; vy = -vy; vz = -vz; }
-  if (vz < 0.0015) return null; // at infinity
-  return {
-    x: cx + focal * vx / vz,
-    y: cy + focal * vy / vz,
-  };
+  if (vz < 0) { vx=-vx; vy=-vy; vz=-vz; }
+  if (vz < 0.0015) return null;
+  return { x: cx + focal*vx/vz, y: cy + focal*vy/vz };
 }
 
-// ─── Canvas/VP helpers ────────────────────────────────────────────────────────
+// ─── Canvas/geometry helpers ──────────────────────────────────────────────────
 
-function isOnCanvas(pt, W, H, margin) {
-  const m = margin || 0;
-  return pt.x >= -m && pt.x <= W + m && pt.y >= -m && pt.y <= H + m;
+function isOnCanvas(pt, W, H) {
+  return pt.x >= 0 && pt.x <= W && pt.y >= 0 && pt.y <= H;
 }
 
-// Clip a segment from `from` toward `to` to the canvas boundary.
-// Returns the point on the canvas edge in that direction.
 function clampToEdge(from, to, W, H) {
-  const dx = to.x - from.x, dy = to.y - from.y;
+  const dx = to.x-from.x, dy = to.y-from.y;
   let tMin = Infinity;
-  // Test all 4 edges
   const tests = [
-    dx !== 0 ? (    0 - from.x) / dx : Infinity,
-    dx !== 0 ? (    W - from.x) / dx : Infinity,
-    dy !== 0 ? (    0 - from.y) / dy : Infinity,
-    dy !== 0 ? (    H - from.y) / dy : Infinity,
+    dx !== 0 ? (0-from.x)/dx : Infinity,
+    dx !== 0 ? (W-from.x)/dx : Infinity,
+    dy !== 0 ? (0-from.y)/dy : Infinity,
+    dy !== 0 ? (H-from.y)/dy : Infinity,
   ];
   for (const t of tests) {
     if (t > 0.0001 && t < tMin) {
-      const px = from.x + t * dx, py = from.y + t * dy;
+      const px = from.x+t*dx, py = from.y+t*dy;
       if (px >= -1 && px <= W+1 && py >= -1 && py <= H+1) tMin = t;
     }
   }
   if (!isFinite(tMin)) return { x: from.x, y: from.y };
-  return { x: from.x + tMin * dx, y: from.y + tMin * dy };
+  return { x: from.x+tMin*dx, y: from.y+tMin*dy };
 }
 
-function dist2(a, b) {
-  return Math.hypot(a.x - b.x, a.y - b.y);
+function dist2(a, b) { return Math.hypot(a.x-b.x, a.y-b.y); }
+
+function avgPoint(pts) {
+  if (!pts.length) return { x:0, y:0 };
+  return {
+    x: pts.reduce((s,p) => s+p.x, 0) / pts.length,
+    y: pts.reduce((s,p) => s+p.y, 0) / pts.length,
+  };
 }
 
-// ─── DOM refs ─────────────────────────────────────────────────────────────────
+// ─── Edge-face adjacency (precomputed) ───────────────────────────────────────
 
-const canvas   = document.getElementById('canvas');
-const ctx      = canvas.getContext('2d');
-const rxSlider = document.getElementById('rx-slider');
-const rySlider = document.getElementById('ry-slider');
-const rzSlider = document.getElementById('rz-slider');
-const rxNum    = document.getElementById('rx-num');
-const ryNum    = document.getElementById('ry-num');
-const rzNum    = document.getElementById('rz-num');
+function buildEdgeFaceMap() {
+  const faceEdgeSets = FACES.map(f => {
+    const s = new Set();
+    for (let i = 0; i < f.verts.length; i++) {
+      const a=f.verts[i], b=f.verts[(i+1)%f.verts.length];
+      s.add(Math.min(a,b)+'_'+Math.max(a,b));
+    }
+    return s;
+  });
+  return EDGES.map(eg => eg.map(([a,b]) => {
+    const key = Math.min(a,b)+'_'+Math.max(a,b);
+    return FACES.map((_,fi) => fi).filter(fi => faceEdgeSets[fi].has(key));
+  }));
+}
 
-// ─── State ───────────────────────────────────────────────────────────────────
-
-let angles = { rx: 0, ry: 0, rz: 0 };
+const EDGE_FACE_MAP = buildEdgeFaceMap();
 
 // ─── Render ──────────────────────────────────────────────────────────────────
 
 function render() {
   const W = canvas.width, H = canvas.height;
-  const cx = W / 2, cy = H / 2;
-  const focal = Math.min(W, H) * 0.7;
-
   ctx.clearRect(0, 0, W, H);
 
-  const rot = makeRotation(angles.rx, angles.ry, angles.rz);
+  let rot, focal, cx, cy, rv;
 
-  // Rotate all vertices
-  const rv = VERTS.map(v => transformVec(rot, v));
+  if (mode === '1pt') {
+    rot   = IDENTITY;
+    focal = Math.min(W,H) * 0.7;
+    cx    = W/2; cy = H/2;
+    rv    = VERTS.map(v => [v[0]+state.boxOffsetX, v[1]+state.boxOffsetY, v[2]]);
 
-  // Project all vertices
+  } else if (mode === '2pt') {
+    rot   = makeRotation(0, state.ry2, 0);
+    focal = (Math.min(W,H)/2) / Math.tan(deg(state.fov/2));
+    cx    = W/2; cy = state.horizonFrac * H;
+    const focalRef = (Math.min(W,H)/2) / Math.tan(deg(70/2));
+    const boxScale = focalRef / focal;
+    // Shift box in world-Y so its screen center stays at H/2 regardless of horizon.
+    const boxYShift = (H/2 - cy) * CAM_DIST / focal;
+    rv    = VERTS.map(v => { const r=transformVec(rot,v); return [r[0]*boxScale, r[1]*boxScale + boxYShift, r[2]*boxScale]; });
+
+    // Horizon line
+    ctx.save();
+    ctx.strokeStyle = HORIZON_STROKE;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, cy); ctx.lineTo(W, cy);
+    ctx.stroke();
+    ctx.restore();
+
+  } else {
+    rot   = makeRotation(state.rx3, state.ry3, state.rz3);
+    focal = Math.min(W,H) * 0.7;
+    cx    = W/2; cy = H/2;
+    rv    = VERTS.map(v => transformVec(rot, v));
+  }
+
   const pv = rv.map(v => project(v, focal, cx, cy));
 
-  // Camera direction in world space (camera is at 0,0,-camDist, looks toward +z)
-  // A face is visible if dot(rotated_normal, camera_dir) < 0, where camera_dir = (0,0,1)
-  // Equivalently: face rotated normal z < 0 means it faces the camera.
-  // We use: rotated_face_normal = transformVec(rot, face.n); visible if rotN.z < 0
   const visibleFaces = new Set();
   FACES.forEach((face, fi) => {
-    const rn = transformVec(rot, face.n);
-    if (rn[2] < 0) visibleFaces.add(fi);
+    if (transformVec(rot, face.n)[2] < 0) visibleFaces.add(fi);
   });
 
-  // Build set of visible edges (an edge is visible if at least one adjacent face is visible)
-  // Map each edge to its two adjacent face indices
-  const edgeFaceMap = buildEdgeFaceMap();
-
-  // Draw VP guide lines (behind everything) — dashed lines from edge endpoints toward VPs
   const vpDirs = [
     transformVec(rot, [1,0,0]),
     transformVec(rot, [0,1,0]),
@@ -337,282 +390,258 @@ function render() {
   ];
   const vps = vpDirs.map(d => computeVP(d, focal, cx, cy));
 
-  // For infinity VPs, accumulate canvas-edge crossing points to average later
-  const infCrossings = [null, null, null];
+  // Precompute stable screen directions for each axis (used for guides + arrows)
+  const axisScreen = vpDirs.map(d => {
+    const sl = Math.hypot(d[0], d[1]);
+    return sl > 0.001 ? { x: d[0]/sl, y: d[1]/sl } : { x: 1, y: 0 };
+  });
 
-  // Draw VP guide lines for each axis group
+  // Anchor for infinity VP arrows: projected box center.
+  // In 2/3-pt the box is at world origin → projects to (cx,cy).
+  // In 1-pt the box is translated → arrow tracks the box naturally.
+  const boxWorldCenter = rv.reduce((s,v) => [s[0]+v[0],s[1]+v[1],s[2]+v[2]], [0,0,0])
+                           .map(c => c / rv.length);
+  const boxProj = project(boxWorldCenter, focal, cx, cy) || { x: cx, y: cy };
+
+  // Guide lines
   vps.forEach((vp, ai) => {
-    const color = VP_COLORS[ai];
-    const d = vpDirs[ai];
     const isInf = vp === null;
+    const sd = axisScreen[ai];
 
-    // Screen-space direction for parallel lines when VP is at infinity
-    const screenLen = Math.hypot(d[0], d[1]);
-    const sdx = screenLen > 0.001 ? d[0] / screenLen : 1;
-    const sdy = screenLen > 0.001 ? d[1] / screenLen : 0;
-
-    if (isInf) infCrossings[ai] = { pos: [], neg: [] };
-
-    EDGES[ai].forEach(([vi0, vi1]) => {
-      const p0 = pv[vi0], p1 = pv[vi1];
+    EDGES[ai].forEach(([vi0,vi1]) => {
+      const p0=pv[vi0], p1=pv[vi1];
       if (!p0 || !p1) return;
-
-      [p0, p1].forEach(ep => {
+      [p0,p1].forEach(ep => {
         ctx.save();
-        ctx.setLineDash([5, 5]);
-        ctx.strokeStyle = hexToRgba(color, 0.25);
+        ctx.setLineDash([5,5]);
+        ctx.strokeStyle = GUIDE_STROKE;
         ctx.lineWidth = 1;
         ctx.beginPath();
-
         if (isInf) {
-          // Extend in both directions to canvas boundary
-          const posFar = { x: ep.x + sdx * 10000, y: ep.y + sdy * 10000 };
-          const negFar = { x: ep.x - sdx * 10000, y: ep.y - sdy * 10000 };
-          const posEdge = clampToEdge(ep, posFar, W, H);
-          const negEdge = clampToEdge(ep, negFar, W, H);
-          infCrossings[ai].pos.push(posEdge);
-          infCrossings[ai].neg.push(negEdge);
-          ctx.moveTo(negEdge.x, negEdge.y);
-          ctx.lineTo(posEdge.x, posEdge.y);
-        } else if (isOnCanvas(vp, W, H, 0)) {
-          ctx.moveTo(ep.x, ep.y);
-          ctx.lineTo(vp.x, vp.y);
+          const pe = clampToEdge(ep, {x:ep.x+sd.x*10000,y:ep.y+sd.y*10000}, W, H);
+          const ne = clampToEdge(ep, {x:ep.x-sd.x*10000,y:ep.y-sd.y*10000}, W, H);
+          ctx.moveTo(ne.x,ne.y); ctx.lineTo(pe.x,pe.y);
+        } else if (isOnCanvas(vp,W,H)) {
+          ctx.moveTo(ep.x,ep.y); ctx.lineTo(vp.x,vp.y);
         } else {
-          const edgePt = clampToEdge(ep, vp, W, H);
-          ctx.moveTo(ep.x, ep.y);
-          ctx.lineTo(edgePt.x, edgePt.y);
+          const e = clampToEdge(ep,vp,W,H);
+          ctx.moveTo(ep.x,ep.y); ctx.lineTo(e.x,e.y);
         }
-
         ctx.stroke();
         ctx.restore();
       });
     });
   });
 
-  // Draw edges
+  // Edges
   EDGES.forEach((edgeGroup, ai) => {
-    const color = VP_COLORS[ai];
-    edgeGroup.forEach(([vi0, vi1], ei) => {
-      const p0 = pv[vi0], p1 = pv[vi1];
+    edgeGroup.forEach(([vi0,vi1], ei) => {
+      const p0=pv[vi0], p1=pv[vi1];
       if (!p0 || !p1) return;
-
-      const adjFaces = edgeFaceMap[ai][ei];
-      const visible = adjFaces.some(fi => visibleFaces.has(fi));
-
+      const visible = EDGE_FACE_MAP[ai][ei].some(fi => visibleFaces.has(fi));
       ctx.save();
-      ctx.beginPath();
-      ctx.moveTo(p0.x, p0.y);
-      ctx.lineTo(p1.x, p1.y);
-      ctx.strokeStyle = visible ? color : hexToRgba(color, 0.3);
-      ctx.lineWidth = visible ? 2 : 1;
-      if (!visible) ctx.setLineDash([4, 4]);
+      ctx.beginPath(); ctx.moveTo(p0.x,p0.y); ctx.lineTo(p1.x,p1.y);
+      ctx.strokeStyle = BOX_VISIBLE;
+      ctx.lineWidth   = 2;
       ctx.stroke();
       ctx.restore();
     });
   });
 
-  // Draw VPs and arrowheads
+  // VP markers
   vps.forEach((vp, ai) => {
-    const color = VP_COLORS[ai];
-    const label = VP_LABELS[ai];
-    const d = vpDirs[ai];
-
+    const label=VP_LABELS[ai], d=vpDirs[ai];
     if (vp === null) {
-      // Infinity — draw arrows at averaged crossing points on both sides
-      const cr = infCrossings[ai];
-      if (!cr || cr.pos.length === 0) return;
-      const screenLen = Math.hypot(d[0], d[1]);
-      const sdx = screenLen > 0.001 ? d[0] / screenLen : 1;
-      const sdy = screenLen > 0.001 ? d[1] / screenLen : 0;
-      drawInfinityArrow(ctx, avgPoint(cr.pos), { x:  sdx, y:  sdy }, color, label);
-      drawInfinityArrow(ctx, avgPoint(cr.neg), { x: -sdx, y: -sdy }, color, label);
-      return;
-    }
-
-    if (isOnCanvas(vp, W, H, 0)) {
-      // Draw dot + label
-      ctx.beginPath();
-      ctx.arc(vp.x, vp.y, 7, 0, Math.PI * 2);
-      ctx.fillStyle = color;
-      ctx.fill();
-      ctx.font = 'bold 12px system-ui, sans-serif';
-      ctx.fillStyle = color;
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(label, vp.x + 11, vp.y);
+      const sd = axisScreen[ai];
+      const ox = boxProj.x, oy = boxProj.y;
+      const posEdge = clampToEdge(boxProj, {x: ox + sd.x*10000, y: oy + sd.y*10000}, W, H);
+      const negEdge = clampToEdge(boxProj, {x: ox - sd.x*10000, y: oy - sd.y*10000}, W, H);
+      drawInfinityArrow(ctx, posEdge, { x:  sd.x, y:  sd.y }, VP_STROKE, label);
+      drawInfinityArrow(ctx, negEdge, { x: -sd.x, y: -sd.y }, VP_STROKE, label);
+    } else if (isOnCanvas(vp,W,H)) {
+      ctx.beginPath(); ctx.arc(vp.x,vp.y,7,0,Math.PI*2);
+      ctx.fillStyle=VP_STROKE; ctx.fill();
+      ctx.font='bold 12px system-ui,sans-serif';
+      ctx.fillStyle=VP_STROKE; ctx.textAlign='left'; ctx.textBaseline='middle';
+      ctx.fillText(label, vp.x+11, vp.y);
     } else {
-      // Off canvas — draw arrow at edge with distance
-      const edgePt = clampToEdge({ x: cx, y: cy }, vp, W, H);
-      drawArrow(ctx, edgePt, vp, color, label, Math.round(dist2(edgePt, vp)));
+      const ep = clampToEdge({x:cx,y:cy},vp,W,H);
+      drawArrow(ctx, ep, vp, VP_STROKE, label, Math.round(dist2(ep,vp)));
     }
   });
 }
 
+// ─── Drawing helpers ──────────────────────────────────────────────────────────
+
 function drawArrow(ctx, from, toward, color, label, dist) {
-  const dx = toward.x - from.x, dy = toward.y - from.y;
-  const len = Math.hypot(dx, dy);
-  if (len < 1) return;
-  const ndx = dx / len, ndy = dy / len;
-
-  // Arrow body (short)
-  const bodyLen = 18;
+  const dx=toward.x-from.x, dy=toward.y-from.y;
+  const len=Math.hypot(dx,dy); if (len<1) return;
+  const ndx=dx/len, ndy=dy/len;
+  const bodyLen=18, headLen=10, headW=5, px=-ndy, py=ndx;
   ctx.save();
-  ctx.strokeStyle = color;
-  ctx.fillStyle = color;
-  ctx.lineWidth = 2;
+  ctx.strokeStyle=color; ctx.fillStyle=color; ctx.lineWidth=2;
   ctx.beginPath();
-  ctx.moveTo(from.x - ndx * bodyLen, from.y - ndy * bodyLen);
-  ctx.lineTo(from.x, from.y);
-  ctx.stroke();
-
-  // Arrowhead
-  const headLen = 10, headW = 5;
-  const px = -ndy, py = ndx;
+  ctx.moveTo(from.x-ndx*bodyLen, from.y-ndy*bodyLen);
+  ctx.lineTo(from.x, from.y); ctx.stroke();
   ctx.beginPath();
-  ctx.moveTo(from.x, from.y);
-  ctx.lineTo(from.x - ndx * headLen + px * headW, from.y - ndy * headLen + py * headW);
-  ctx.lineTo(from.x - ndx * headLen - px * headW, from.y - ndy * headLen - py * headW);
-  ctx.closePath();
-  ctx.fill();
-
-  // Distance label near arrow
-  const lx = from.x - ndx * (bodyLen + 6);
-  const ly = from.y - ndy * (bodyLen + 6);
-  ctx.font = 'bold 11px system-ui, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#fff';
+  ctx.moveTo(from.x,from.y);
+  ctx.lineTo(from.x-ndx*headLen+px*headW, from.y-ndy*headLen+py*headW);
+  ctx.lineTo(from.x-ndx*headLen-px*headW, from.y-ndy*headLen-py*headW);
+  ctx.closePath(); ctx.fill();
+  const lx=from.x-ndx*(bodyLen+6), ly=from.y-ndy*(bodyLen+6);
+  ctx.font='bold 11px system-ui,sans-serif';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillStyle='#fff';
   ctx.fillText(`${label}  ${dist.toLocaleString()}px`, lx, ly);
-  ctx.fillStyle = color;
-  ctx.fillText(`${label}  ${dist.toLocaleString()}px`, lx + 0.5, ly + 0.5);
-
+  ctx.fillStyle=color;
+  ctx.fillText(`${label}  ${dist.toLocaleString()}px`, lx+0.5, ly+0.5);
   ctx.restore();
-}
-
-function avgPoint(pts) {
-  if (!pts.length) return { x: 0, y: 0 };
-  return {
-    x: pts.reduce((s, p) => s + p.x, 0) / pts.length,
-    y: pts.reduce((s, p) => s + p.y, 0) / pts.length,
-  };
 }
 
 function drawInfinityArrow(ctx, pt, dir, color, label) {
-  const len = Math.hypot(dir.x, dir.y);
-  if (len < 0.001) return;
-  const nx = dir.x / len, ny = dir.y / len;
-  const px = -ny, py = nx;
-
-  const headLen = 13, headW = 7, bodyLen = 26;
-  const innerX = pt.x - nx * bodyLen, innerY = pt.y - ny * bodyLen;
-
+  const len=Math.hypot(dir.x,dir.y); if (len<0.001) return;
+  const nx=dir.x/len, ny=dir.y/len, px=-ny, py=nx;
+  const headLen=13, headW=7, bodyLen=26;
+  const ix=pt.x-nx*bodyLen, iy=pt.y-ny*bodyLen;
   ctx.save();
-  ctx.strokeStyle = color;
-  ctx.fillStyle = color;
-  ctx.lineWidth = 2.5;
-
-  // Arrow body
+  ctx.strokeStyle=color; ctx.fillStyle=color; ctx.lineWidth=2.5;
+  ctx.beginPath(); ctx.moveTo(ix,iy); ctx.lineTo(pt.x-nx*headLen, pt.y-ny*headLen); ctx.stroke();
   ctx.beginPath();
-  ctx.moveTo(innerX, innerY);
-  ctx.lineTo(pt.x - nx * headLen, pt.y - ny * headLen);
-  ctx.stroke();
-
-  // Arrowhead
-  ctx.beginPath();
-  ctx.moveTo(pt.x, pt.y);
-  ctx.lineTo(pt.x - nx * headLen + px * headW, pt.y - ny * headLen + py * headW);
-  ctx.lineTo(pt.x - nx * headLen - px * headW, pt.y - ny * headLen - py * headW);
-  ctx.closePath();
-  ctx.fill();
-
-  // Label pill, set back from arrow body
-  const lx = innerX - nx * 14, ly = innerY - ny * 14;
-  const text = `${label} ∞`;
-  ctx.font = 'bold 12px system-ui, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  const tw = ctx.measureText(text).width;
-  const pad = 6;
-  ctx.fillStyle = 'rgba(247,245,240,0.92)';
-  ctx.fillRect(lx - tw / 2 - pad, ly - 10, tw + pad * 2, 20);
-  ctx.fillStyle = color;
-  ctx.fillText(text, lx, ly);
-
+  ctx.moveTo(pt.x,pt.y);
+  ctx.lineTo(pt.x-nx*headLen+px*headW, pt.y-ny*headLen+py*headW);
+  ctx.lineTo(pt.x-nx*headLen-px*headW, pt.y-ny*headLen-py*headW);
+  ctx.closePath(); ctx.fill();
+  const lx=ix-nx*14, ly=iy-ny*14;
+  const text=`${label} ∞`;
+  ctx.font='bold 12px system-ui,sans-serif';
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  const tw=ctx.measureText(text).width, pad=6;
+  ctx.fillStyle='rgba(247,245,240,0.92)';
+  ctx.fillRect(lx-tw/2-pad, ly-10, tw+pad*2, 20);
+  ctx.fillStyle=color; ctx.fillText(text, lx, ly);
   ctx.restore();
-}
-
-// ─── Edge-to-face adjacency map ───────────────────────────────────────────────
-
-function buildEdgeFaceMap() {
-  // Returns edgeFaceMap[axisIdx][edgeIdx] = [faceIdx, ...]
-  // We pre-compute by checking which faces share each edge's vertex pair.
-  const faceEdgeSets = FACES.map(f => {
-    const s = new Set();
-    for (let i = 0; i < f.verts.length; i++) {
-      const a = f.verts[i], b = f.verts[(i+1) % f.verts.length];
-      s.add(Math.min(a,b) + '_' + Math.max(a,b));
-    }
-    return s;
-  });
-
-  return EDGES.map(edgeGroup =>
-    edgeGroup.map(([a, b]) => {
-      const key = Math.min(a,b) + '_' + Math.max(a,b);
-      return FACES.map((_, fi) => fi).filter(fi => faceEdgeSets[fi].has(key));
-    })
-  );
-}
-
-function hexToRgba(hex, alpha) {
-  const r = parseInt(hex.slice(1,3),16);
-  const g = parseInt(hex.slice(3,5),16);
-  const b = parseInt(hex.slice(5,7),16);
-  return `rgba(${r},${g},${b},${alpha})`;
 }
 
 // ─── Controls ────────────────────────────────────────────────────────────────
 
-function setAngles(rx, ry, rz) {
-  angles.rx = +rx; angles.ry = +ry; angles.rz = +rz;
-  rxSlider.value = rx; rxNum.value = rx;
-  rySlider.value = ry; ryNum.value = ry;
-  rzSlider.value = rz; rzNum.value = rz;
+function makeSliderRow(labelText, colorClass, min, max, value, unit, onChange) {
+  const row = document.createElement('div');
+  row.className = 'axis-row';
+
+  const lbl = document.createElement('label');
+  if (colorClass) lbl.className = colorClass;
+  lbl.textContent = labelText;
+
+  const slider = document.createElement('input');
+  slider.autocomplete='off'; slider.type='range';
+  slider.min=min; slider.max=max; slider.value=value;
+
+  const num = document.createElement('input');
+  num.autocomplete='off'; num.type='number';
+  num.min=min; num.max=max; num.value=value;
+
+  const unitSpan = document.createElement('span');
+  unitSpan.className='unit'; unitSpan.textContent=unit;
+
+  slider.addEventListener('input', () => { num.value=slider.value; onChange(+slider.value); });
+  num.addEventListener('input', () => {
+    const v=Math.max(min, Math.min(max, +num.value));
+    slider.value=v; onChange(v);
+  });
+
+  row.append(lbl, slider, num, unitSpan);
+  return { row, slider, num };
+}
+
+function buildControls(modeId) {
+  controlRefs = {};
+  const area = document.getElementById('controls-area');
+  area.innerHTML = '';
+
+  if (modeId === '2pt') {
+    const ry = makeSliderRow('Ry', 'ry', -180, 180, state.ry2, '°', v => { state.ry2=v; render(); });
+    const hz = makeSliderRow('Horizon', null, 0, 100, Math.round(state.horizonFrac*100), '%', v => { state.horizonFrac=v/100; render(); });
+    const fv = makeSliderRow('FOV', null, 20, 120, state.fov, '°', v => { state.fov=v; render(); });
+    const animBtn = document.createElement('button');
+    animBtn.id = 'anim-btn'; animBtn.className = 'preset-btn';
+    animBtn.textContent = animating ? 'Stop' : 'Animate';
+    animBtn.addEventListener('click', toggleAnimation);
+    area.append(ry.row, hz.row, fv.row, animBtn);
+    controlRefs.ry2=ry; controlRefs.horizonFrac=hz; controlRefs.fov=fv;
+
+  } else if (modeId === '3pt') {
+    const ry = makeSliderRow('Ry', 'ry', -180, 180, state.ry3, '°', v => { state.ry3=v; render(); });
+    const rx = makeSliderRow('Rx', 'rx', -180, 180, state.rx3, '°', v => { state.rx3=v; render(); });
+    const rz = makeSliderRow('Rz', 'rz', -180, 180, state.rz3, '°', v => { state.rz3=v; render(); });
+    area.append(ry.row, rx.row, rz.row);
+    controlRefs.ry3=ry; controlRefs.rx3=rx; controlRefs.rz3=rz;
+  }
+}
+
+const STATE_DEFAULTS = {
+  '1pt': { boxOffsetX: 0, boxOffsetY: 0 },
+  '2pt': { ry2: 45, horizonFrac: 0.5, fov: 70 },
+  '3pt': { rx3: 25, ry3: 35, rz3: 0 },
+};
+
+function switchMode(id) {
+  stopAnimation();
+  mode = id;
+  Object.assign(state, STATE_DEFAULTS[id]);
+  document.querySelectorAll('.mode-tab').forEach(t =>
+    t.classList.toggle('active', t.dataset.mode === id));
+  document.getElementById('instruction-text').textContent = INSTRUCTIONS[id];
+  buildControls(id);
   render();
 }
 
-function bindAxis(slider, num, key) {
-  slider.addEventListener('input', () => {
-    angles[key] = +slider.value;
-    num.value = slider.value;
-    render();
-  });
-  num.addEventListener('input', () => {
-    const v = Math.max(-180, Math.min(180, +num.value));
-    angles[key] = v;
-    slider.value = v;
-    render();
-  });
-}
+document.querySelectorAll('.mode-tab').forEach(btn =>
+  btn.addEventListener('click', () => switchMode(btn.dataset.mode)));
 
-bindAxis(rxSlider, rxNum, 'rx');
-bindAxis(rySlider, ryNum, 'ry');
-bindAxis(rzSlider, rzNum, 'rz');
-
-// ─── Drag to rotate ───────────────────────────────────────────────────────────
+// ─── Drag ────────────────────────────────────────────────────────────────────
 
 let dragState = null;
 
 function startDrag(x, y) {
-  dragState = { x, y, rx: angles.rx, ry: angles.ry };
+  if (mode === '2pt') stopAnimation();
+  dragState = { x, y,
+    boxOffsetX: state.boxOffsetX, boxOffsetY: state.boxOffsetY,
+    ry2: state.ry2, horizonFrac: state.horizonFrac,
+    ry3: state.ry3, rx3: state.rx3,
+  };
   canvas.classList.add('dragging');
 }
 
 function moveDrag(x, y) {
   if (!dragState) return;
-  const dx = x - dragState.x, dy = y - dragState.y;
-  const newRy = ((dragState.ry + dx * DRAG_SENS) + 540) % 360 - 180;
-  const newRx = Math.max(-180, Math.min(180, dragState.rx + dy * DRAG_SENS));
-  setAngles(newRx, newRy, angles.rz);
+  const dx = x-dragState.x, dy = y-dragState.y;
+  const W=canvas.width, H=canvas.height;
+
+  if (mode === '1pt') {
+    const focal = Math.min(W,H)*0.7;
+    state.boxOffsetX = dragState.boxOffsetX + dx*(CAM_DIST/focal);
+    state.boxOffsetY = dragState.boxOffsetY + dy*(CAM_DIST/focal);
+
+  } else if (mode === '2pt') {
+    state.ry2 = ((dragState.ry2 + dx*DRAG_SENS) + 540) % 360 - 180;
+    state.horizonFrac = Math.max(0.05, Math.min(0.95, dragState.horizonFrac + dy/H));
+    if (controlRefs.ry2) {
+      const v=Math.round(state.ry2);
+      controlRefs.ry2.slider.value=v; controlRefs.ry2.num.value=v;
+    }
+    if (controlRefs.horizonFrac) {
+      const pct=Math.round(state.horizonFrac*100);
+      controlRefs.horizonFrac.slider.value=pct; controlRefs.horizonFrac.num.value=pct;
+    }
+
+  } else {
+    state.ry3 = ((dragState.ry3 + dx*DRAG_SENS) + 540) % 360 - 180;
+    state.rx3 = Math.max(-180, Math.min(180, dragState.rx3 + dy*DRAG_SENS));
+    if (controlRefs.ry3) { const v=Math.round(state.ry3); controlRefs.ry3.slider.value=v; controlRefs.ry3.num.value=v; }
+    if (controlRefs.rx3) { const v=Math.round(state.rx3); controlRefs.rx3.slider.value=v; controlRefs.rx3.num.value=v; }
+  }
+
+  render();
 }
 
 function endDrag() {
@@ -625,19 +654,11 @@ canvas.addEventListener('mousemove',  e => moveDrag(e.clientX, e.clientY));
 canvas.addEventListener('mouseup',    endDrag);
 canvas.addEventListener('mouseleave', endDrag);
 
-canvas.addEventListener('touchstart', e => {
-  e.preventDefault();
-  const t = e.touches[0];
-  startDrag(t.clientX, t.clientY);
-}, { passive: false });
-canvas.addEventListener('touchmove', e => {
-  e.preventDefault();
-  const t = e.touches[0];
-  moveDrag(t.clientX, t.clientY);
-}, { passive: false });
-canvas.addEventListener('touchend', endDrag);
+canvas.addEventListener('touchstart', e => { e.preventDefault(); const t=e.touches[0]; startDrag(t.clientX,t.clientY); }, {passive:false});
+canvas.addEventListener('touchmove',  e => { e.preventDefault(); const t=e.touches[0]; moveDrag(t.clientX,t.clientY); }, {passive:false});
+canvas.addEventListener('touchend',   endDrag);
 
-// ─── Resize ───────────────────────────────────────────────────────────────────
+// ─── Init ────────────────────────────────────────────────────────────────────
 
 function resize() {
   const wrap = document.getElementById('canvas-wrap');
@@ -647,6 +668,7 @@ function resize() {
 }
 
 window.addEventListener('resize', resize);
+switchMode('1pt');
 resize();
 </script>
 </body>
